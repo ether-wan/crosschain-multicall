@@ -1,4 +1,4 @@
-name: CI - Test Multicall w/ Foundry
+name: CI - build
 
 on:
   push:
