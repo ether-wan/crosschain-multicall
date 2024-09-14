@@ -11,7 +11,7 @@
 
 ## Disclaimer
 
-⚠️ **Attention:** This project is experimental and not intended for production use in its current state. It is meant for testing and educational purposes only.
+This project is experimental and not intended for production use in its current state. It is meant for testing and educational purposes only.
 
 ## Installation
 
