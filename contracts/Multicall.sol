@@ -11,14 +11,19 @@ import { MessagingReceipt } from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSen
 import { MulticallCodes } from "./utils/MulticallCodes.sol";
 
 contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
+
     using OptionsBuilder for bytes;
 
     struct Call {
         address target;
         bytes callData;
-        bool returnData;
         uint128 value;
+    }
+
+    struct CallBundle {
+        Call[] calls;
         uint32 dstEid;
+        uint128 gasLimit;
     }
 
     mapping(uint32 eid => mapping(bytes32 sender => uint64 nonce)) private receivedNonce;
@@ -33,31 +38,37 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
      * @notice Sends a message to the destination chain.
      */
     function lzAggregate(
-        Call[] calldata _calls,
-        DeliveryCode _deliveryCode,
-        uint128 _gas
+        CallBundle[] calldata _callsBundles,
+        DeliveryCode _deliveryCode
     ) public payable returns (MessagingReceipt memory receipt) {
-        uint256 length = _calls.length;
+        uint256 length = _callsBundles.length;
 
         uint256 totalNativeFeeUsed = 0;
         uint256 remainingValue = msg.value;
 
-        Call calldata call;
+        CallBundle calldata callBundle;
 
         if (_deliveryCode == DeliveryCode.ORDERED_DELIVERY) {
             for (uint i = 0; i < length; ) {
-                call = _calls[i];
+                callBundle = _callsBundles[i];
 
-                _getPeerOrRevert(call.dstEid);
+                _getPeerOrRevert(callBundle.dstEid);
 
-                bytes memory payload = abi.encode(DeliveryCode.ORDERED_DELIVERY, call);
+                bytes memory payload = abi.encode(DeliveryCode.ORDERED_DELIVERY, callBundle.calls);
+
+                uint128 totalETHValue = 0;
+
+                for (uint j = 0; j < callBundle.calls.length; ) {
+                    totalETHValue += callBundle.calls[j].value;
+                    unchecked {++j;}
+                }
 
                 bytes memory options = OptionsBuilder
                     .newOptions()
-                    .addExecutorLzReceiveOption(_gas, call.value)
+                    .addExecutorLzReceiveOption(callBundle.gasLimit, totalETHValue)
                     .addExecutorOrderedExecutionOption();
 
-                MessagingFee memory fee = _quote(call.dstEid, payload, options, false);
+                MessagingFee memory fee = _quote(callBundle.dstEid, payload, options, false);
 
                 totalNativeFeeUsed += fee.nativeFee;
                 remainingValue -= fee.nativeFee;
@@ -65,10 +76,10 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
                 require(remainingValue >= 0, "Insufficient gas fee");
 
                 receipt = _lzSend(
-                    call.dstEid,
+                    callBundle.dstEid,
                     payload,
                     options,
-                    MessagingFee(call.value + fee.nativeFee, 0),
+                    MessagingFee(totalETHValue + fee.nativeFee, 0),
                     payable(msg.sender)
                 );
 
@@ -85,30 +96,36 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
 
     /**
      * @notice Quotes the gas needed to pay for the full omnichain transaction in native gas or ZRO token.
-     * @param _calls desc
+     * @param _callBundles desc
      * @param _deliveryCode desc
      * @return nativeFee A `MessagingFee` struct containing the calculated gas fee in either the native token or ZRO token.
      */
     function quoteAggregate(
-        Call[] calldata _calls,
-        DeliveryCode _deliveryCode,
-        uint128 _gas
+        CallBundle[] calldata _callBundles,
+        DeliveryCode _deliveryCode
     ) public view returns (uint256 nativeFee) {
-        uint256 length = _calls.length;
-        Call calldata call;
+        uint256 length = _callBundles.length;
+        CallBundle calldata callBundle;
 
         if (_deliveryCode == DeliveryCode.ORDERED_DELIVERY) {
             for (uint i = 0; i < length; ) {
-                call = _calls[i];
+                callBundle = _callBundles[i];
 
-                bytes memory payload = abi.encode(_deliveryCode, call);
+                bytes memory payload = abi.encode(_deliveryCode, callBundle.calls);
+
+                uint128 totalETHValue = 0;
+
+                for (uint j = 0; j < callBundle.calls.length; ) {
+                    totalETHValue += callBundle.calls[j].value;
+                    unchecked {++j;}
+                }
 
                 bytes memory options = OptionsBuilder
                     .newOptions()
-                    .addExecutorLzReceiveOption(_gas, call.value)
+                    .addExecutorLzReceiveOption(callBundle.gasLimit, totalETHValue)
                     .addExecutorOrderedExecutionOption();
 
-                MessagingFee memory fee = _quote(call.dstEid, payload, options, false);
+                MessagingFee memory fee = _quote(callBundle.dstEid, payload, options, false);
 
                 nativeFee += fee.nativeFee;
 
@@ -122,13 +139,20 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
 
         if (_deliveryCode == DeliveryCode.UNORDERED_DELIVERY) {
             for (uint i = 0; i < length; ) {
-                call = _calls[i];
+                callBundle = _callBundles[i];
 
-                bytes memory payload = abi.encode(_deliveryCode, call);
+                bytes memory payload = abi.encode(_deliveryCode, callBundle.calls);
 
-                bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(_gas, call.value);
+                uint128 totalETHValue = 0;
 
-                MessagingFee memory fee = _quote(call.dstEid, payload, options, false);
+                for (uint j = 0; j < callBundle.calls.length; ) {
+                    totalETHValue += callBundle.calls[j].value;
+                    unchecked {++j;}
+                }
+
+                bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(callBundle.gasLimit, totalETHValue);
+
+                MessagingFee memory fee = _quote(callBundle.dstEid, payload, options, false);
 
                 nativeFee += fee.nativeFee;
 
@@ -151,16 +175,24 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
         address /*_executor*/,
         bytes calldata /*_extraData*/
     ) public payable override {
-        (DeliveryCode code, Call memory call) = abi.decode(_message, (DeliveryCode, Call));
+        (DeliveryCode code, Call[] memory calls) = abi.decode(_message, (DeliveryCode, Call[]));
 
         if (code == DeliveryCode.ORDERED_DELIVERY) {
             _acceptNonce(_origin.srcEid, _origin.sender, _origin.nonce);
         }
 
-        (bool success, bytes memory returnData) = call.target.call{ value: call.value }(call.callData);
+        uint256 length = calls.length;
 
-        if (call.returnData) {
-            emit ReturnedData(returnData);
+        Call memory call;
+
+        for (uint i = 0; i < length; ) {
+            call = calls[i];
+
+            (bool success, bytes memory returnData) = call.target.call{ value: call.value }(call.callData);
+
+            unchecked {
+                ++i;
+            }
         }
 
         emit LogCall(code, call, msg.value);
@@ -184,7 +216,11 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
         bytes calldata payload,
         address /*_executor*/,
         bytes calldata /*_extraData*/
-    ) internal override {}
+    ) internal override {
+        (bytes memory data) = abi.decode(payload, (bytes));
+
+        emit ReturnedData(data);
+    }
 
     function _payNative(uint256 _nativeFee) internal virtual override returns (uint256 nativeFee) {
         if (msg.value < _nativeFee) revert NotEnoughNative(msg.value);
