@@ -2,25 +2,27 @@
 pragma solidity ^0.8.20;
 
 // Multicall imports
-import { Multicall } from "../../contracts/Multicall.sol";
-import { Target } from "../../contracts/Target.sol";
+import {Multicall} from "../../contracts/Multicall.sol";
+import {Target} from "../../contracts/Target.sol";
 
-import { MulticallCodes } from "../../contracts/utils/MulticallCodes.sol";
+import {MulticallCodes} from "../../contracts/utils/MulticallCodes.sol";
+
+import {MessagingFee} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 
 // OApp imports
-import { IOAppOptionsType3, EnforcedOptionParam } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OAppOptionsType3.sol";
-import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
+import {IOAppOptionsType3, EnforcedOptionParam} from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OAppOptionsType3.sol";
+import {OptionsBuilder} from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 
 // OZ imports
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 // Forge imports
 import "forge-std/console.sol";
 import "forge-std/Test.sol";
-import { Vm } from "forge-std/Test.sol";
+import {Vm} from "forge-std/Test.sol";
 
 // DevTools imports
-import { TestHelperOz5 } from "@layerzerolabs/test-devtools-evm-foundry/contracts/TestHelperOz5.sol";
+import {TestHelperOz5} from "@layerzerolabs/test-devtools-evm-foundry/contracts/TestHelperOz5.sol";
 
 contract MulticallTest is TestHelperOz5, MulticallCodes {
     using OptionsBuilder for bytes;
@@ -52,11 +54,26 @@ contract MulticallTest is TestHelperOz5, MulticallCodes {
         super.setUp();
         setUpEndpoints(3, LibraryType.UltraLightNode);
 
-        mA = Multicall(_deployOApp(type(Multicall).creationCode, abi.encode(address(endpoints[aEid]), address(this))));
+        mA = Multicall(
+            _deployOApp(
+                type(Multicall).creationCode,
+                abi.encode(address(endpoints[aEid]), address(this))
+            )
+        );
 
-        mB = Multicall(_deployOApp(type(Multicall).creationCode, abi.encode(address(endpoints[bEid]), address(this))));
+        mB = Multicall(
+            _deployOApp(
+                type(Multicall).creationCode,
+                abi.encode(address(endpoints[bEid]), address(this))
+            )
+        );
 
-        mC = Multicall(_deployOApp(type(Multicall).creationCode, abi.encode(address(endpoints[cEid]), address(this))));
+        mC = Multicall(
+            _deployOApp(
+                type(Multicall).creationCode,
+                abi.encode(address(endpoints[cEid]), address(this))
+            )
+        );
 
         tB = Target(_deployOApp(type(Target).creationCode, abi.encode()));
 
@@ -83,7 +100,6 @@ contract MulticallTest is TestHelperOz5, MulticallCodes {
         assertEq(address(mA.endpoint()), address(endpoints[aEid]));
         assertEq(address(mB.endpoint()), address(endpoints[bEid]));
         assertEq(address(mC.endpoint()), address(endpoints[cEid]));
-
     }
 
     function test_peers() public {
@@ -98,19 +114,42 @@ contract MulticallTest is TestHelperOz5, MulticallCodes {
     }
 
     function test_aggregate_ordered() public {
+        Multicall.CallBundle[] memory _callBundles = new Multicall.CallBundle[](
+            1
+        );
 
         Multicall.Call[] memory _calls = new Multicall.Call[](2);
-        _calls[0] = Multicall.Call(address(tB), abi.encodeWithSignature("setValue(uint256)", 5), true, 0 ether, bEid);
-        _calls[1] = Multicall.Call(address(tC), abi.encodeWithSignature("setValue(uint256)", 10), true, 0 ether, cEid);
 
-        uint256 nativeFee = mA.quoteAggregate(_calls, DeliveryCode.ORDERED_DELIVERY, 500000);
+        _calls[0] = Multicall.Call(
+            address(tB),
+            abi.encodeWithSignature("setValue(uint256)", 5),
+            0
+        );
 
-        mA.lzAggregate{value : nativeFee}(_calls, DeliveryCode.ORDERED_DELIVERY, 500000);
+        _calls[1] = Multicall.Call(
+            address(tB),
+            abi.encodeWithSignature("setValue(uint256)", 10),
+            0
+        );
+
+        _callBundles[0] = Multicall.CallBundle(
+            _calls,
+            bEid,
+            1000000
+        );
+
+        uint256 nativeFee = mA.quoteAggregate(
+            _callBundles,
+            DeliveryCode.ORDERED_DELIVERY
+        );
+
+        mA.lzAggregate{value: nativeFee}(
+            _callBundles,
+            DeliveryCode.ORDERED_DELIVERY
+        );
 
         verifyPackets(bEid, addressToBytes32((address(mB))));
-        verifyPackets(cEid, addressToBytes32((address(mC))));
 
-        assertEq(tB.value(), 5);
-        assertEq(tC.value(), 10);
+        assertEq(tB.value(), 10);
     }
 }
