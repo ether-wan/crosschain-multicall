@@ -28,9 +28,7 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
 
     mapping(uint32 eid => mapping(bytes32 sender => uint64 nonce)) private receivedNonce;
 
-    event LogCall(DeliveryCode code, Call call, uint256 value);
-    event Confirmation(uint32 srcEid, bytes32 sender, uint64 nonce);
-    event ReturnedData(bytes data);
+    event LogCall(bytes32 guid, bool success, bytes returnData);
 
     constructor(address _endpoint, address _delegate) OApp(_endpoint, _delegate) Ownable(_delegate) {}
 
@@ -170,7 +168,7 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
      */
     function lzReceive(
         Origin calldata _origin,
-        bytes32 /*_guid*/,
+        bytes32 _guid,
         bytes calldata _message,
         address /*_executor*/,
         bytes calldata /*_extraData*/
@@ -190,12 +188,12 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
 
             (bool success, bytes memory returnData) = call.target.call{ value: call.value }(call.callData);
 
+            emit LogCall(_guid, success, returnData);
+
             unchecked {
                 ++i;
             }
         }
-
-        emit LogCall(code, call, msg.value);
     }
 
     /**
@@ -216,11 +214,7 @@ contract Multicall is OApp, OAppOptionsType3, MulticallCodes {
         bytes calldata payload,
         address /*_executor*/,
         bytes calldata /*_extraData*/
-    ) internal override {
-        (bytes memory data) = abi.decode(payload, (bytes));
-
-        emit ReturnedData(data);
-    }
+    ) internal override {}
 
     function _payNative(uint256 _nativeFee) internal virtual override returns (uint256 nativeFee) {
         if (msg.value < _nativeFee) revert NotEnoughNative(msg.value);

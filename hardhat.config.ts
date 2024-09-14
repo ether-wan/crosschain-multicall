@@ -58,20 +58,20 @@ const config: HardhatUserConfig = {
             url: process.env.RPC_URL_SEPOLIA || 'https://rpc.sepolia.org/',
             accounts,
         },
-        'avalanche-testnet': {
-            eid: EndpointId.AVALANCHE_V2_TESTNET,
-            url: process.env.RPC_URL_FUJI || 'https://rpc.ankr.com/avalanche_fuji',
+        'base-testnet': {
+            eid: EndpointId.BASESEP_V2_TESTNET,
+            url: process.env.RPC_URL_BASE || 'https://rpc.baseledger.com/',
             accounts,
         },
-        'amoy-testnet': {
-            eid: EndpointId.AMOY_V2_TESTNET,
-            url: process.env.RPC_URL_AMOY || 'https://polygon-amoy-bor-rpc.publicnode.com',
+        'arbitrum-testnet': {
+            eid: EndpointId.ARBITRUM_V2_TESTNET,
+            url: process.env.RPC_URL_ARBITRUM || 'https://arb-rinkeby.g.alchemy.com/v2/your-api-key',
             accounts,
         },
     },
     namedAccounts: {
         deployer: {
-            default: 0, // wallet address of index[0], of the mnemonic in .env
+            default: 0,
         },
     },
 }
